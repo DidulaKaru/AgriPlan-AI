@@ -72,6 +72,15 @@ with col_input:
             st.markdown("**💰 Financial Resource Limit**")
             budget = st.number_input("Available Capital (USD)", min_value=100.0, value=1500.0, step=100.0)
             
+            st.markdown("---")
+            st.markdown("**📐 Farm Dimensions & Fleet**")
+            land_area = st.number_input("Cultivable Land Area (Acres)", min_value=0.5, value=1.0, step=0.5)
+            machinery = st.multiselect(
+                "Available Machinery/Infrastructure",
+                options=["Tractor", "Power Tiller", "Drip Irrigation System", "Greenhouse Frame"],
+                default=[]
+            )
+            
             st.markdown("")
             submit_btn = st.button("Generate Recommendations", type="primary", use_container_width=True)
 
@@ -83,7 +92,9 @@ with col_results:
             "lat": st.session_state.lat,
             "lon": st.session_state.lon,
             "soil_npk": {"N": n, "P": p, "K": k},
-            "budget": budget
+            "budget": budget,
+            "land_area": land_area,
+            "machinery": machinery
         }
         
         with st.status("🧠 Initializing LangGraph Orchestrator...", expanded=True) as status:
@@ -102,15 +113,34 @@ with col_results:
                     
                     st.success(f"### Recommended Strategy: **{data.get('crop_name', 'Rice')}**")
                     
-                    m_col1, m_col2 = st.columns(2)
+                    m_col1, m_col2, m_col3 = st.columns(3)
                     with m_col1:
-                        st.metric(label="Expected Yield", value=data.get("estimated_yield", "4.2 Tons/Acre"))
+                        st.metric(label="Farming Method", value=data.get("farming_method", "Open Field"))
                     with m_col2:
-                        st.metric(label="Risk Alignment Factor", value="Optimal Match", delta="Low Risk")
+                        st.metric(label="Expected Yield", value=data.get("estimated_yield", "N/A"))
+                    with m_col3:
+                        st.metric(label="Total Est. Cost", value=f"${data.get('total_estimated_cost_usd', 0.0):,.2f}")
+                    
+                    # Soil Amendments & Fertilizer Advice Alert
+                    soil_amendment_required = data.get("soil_amendment_required", False)
+                    fertilizer_advice = data.get("fertilizer_advice", "None")
+                    
+                    if soil_amendment_required:
+                        st.warning(f"⚠️ **Soil Amendment Required:** {fertilizer_advice}")
+                    else:
+                        st.info(f"ℹ️ **Soil Alignment:** {fertilizer_advice}")
                     
                     with st.container(border=True):
                         st.markdown("#### 📋 Strategic Rationale")
-                        st.write(data.get('reasoning', 'Optimized based on local soil and economic criteria.'))
+                        
+                        # Extract the raw text
+                        raw_reasoning = data.get('reasoning', 'No rationale provided.')
+                        
+                        # Clean it: Escape dollar signs so Streamlit doesn't interpret them as LaTeX
+                        clean_reasoning = raw_reasoning.replace("$", "\\$")
+                        
+                        # Render the clean text
+                        st.write(clean_reasoning)
                 else:
                     status.update(label="❌ Pipeline execution failed.", state="error")
                     st.error("Backend error processing data.")

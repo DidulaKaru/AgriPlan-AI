@@ -18,19 +18,38 @@ app = FastAPI(title="AgriPlan AI API", lifespan=lifespan)
 @app.post("/recommend")
 async def recommend_crops(farmer_input: FarmerInput):
     try:
-        # Initialize LangGraph state with farmer data
+        # Explicit state initialization to ensure absolute compatibility with worker nodes
         initial_state = {
-            "farmer_data": farmer_input.model_dump(),
+            "farmer_data": {
+                "lat": farmer_input.lat,
+                "lon": farmer_input.lon,
+                "budget": farmer_input.budget,
+                "land_area": farmer_input.land_area,
+                "machinery": farmer_input.machinery
+            },
+            # Map soil metrics at the root level AND inside farmer data to prevent key errors
+            "soil_data": farmer_input.soil_npk, 
+            "soil_npk": farmer_input.soil_npk,
+            
             "climate_data": {},
-            "market_trends": {},
-            "feasibility_report": {},
-            "next_node": None
+            "market_trends": "",
+            "feasibility_report": None,
+            
+            # Explicitly set the initial target node string so the graph router triggers correctly
+            "next_node": "climate_agent" 
         }
         
         # Invoke the multi-agent graph execution loop
         final_state = graph_app.invoke(initial_state)
         
-        # Return final feasibility report containing recommendations
-        return final_state.get("feasibility_report", {})
+        # Extract the final report payload
+        report = final_state.get("feasibility_report")
+        
+        # If the graph returned a Pydantic object model, convert it to a clean JSON dict for the frontend
+        if hasattr(report, "model_dump"):
+            return report.model_dump()
+            
+        return report if report else {}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
