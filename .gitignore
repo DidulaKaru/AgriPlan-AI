@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Python caching & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Databases and local RAG data
+data/
+chroma_db/
+*.db
+
+# Streamlit config/cache
+.streamlit/
