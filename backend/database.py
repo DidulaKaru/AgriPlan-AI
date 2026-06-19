@@ -7,11 +7,26 @@ client = chromadb.EphemeralClient()
 # Get or create the collection for market trends
 collection = client.get_or_create_collection(name="market_trends")
 
+def initialize_vector_store():
+    # 1. Read the market_trends.txt raw text
+    with open("data/market_trends.txt", "r") as f:
+        raw_data = f.read()
+    
+    # 2. Split by distinct paragraphs to keep crop records logically unified
+    chunks = [chunk.strip() for chunk in raw_data.split("\n\n") if chunk.strip()]
+    
+    # 3. Add to ChromaDB collection
+    # (ChromaDB handles generating the text embeddings behind the scenes via its default model)
+    collection.add(
+        documents=chunks,
+        ids=[f"crop_data_{i}" for i in range(len(chunks))]
+    )
+
 def initialize_database():
     """
     Checks for a local file 'data/market_trends.txt'.
-    If it doesn't exist, creates it with 3 sample lines of crop market trend text.
-    Chunks, embeds, and stores this data in ChromaDB.
+    If it doesn't exist, creates it with sample crop market trend paragraphs.
+    Chunks, embeds, and stores this data in ChromaDB using paragraph-based chunking.
     """
     data_dir = "data"
     file_path = os.path.join(data_dir, "market_trends.txt")
@@ -28,18 +43,10 @@ def initialize_database():
             "Government subsidies for smart irrigation systems are boosting productivity for leafy green vegetable farming."
         ]
         with open(file_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(sample_trends))
+            f.write("\n\n".join(sample_trends))
             
-    # Read, chunk (by line), and store data
-    with open(file_path, "r", encoding="utf-8") as f:
-        lines = [line.strip() for line in f if line.strip()]
-        
-    if lines:
-        ids = [f"trend_{i}" for i in range(len(lines))]
-        collection.add(
-            documents=lines,
-            ids=ids
-        )
+    # Read, chunk, and store using paragraph-based chunking
+    initialize_vector_store()
 
 def query_market_trends(query: str) -> str:
     """

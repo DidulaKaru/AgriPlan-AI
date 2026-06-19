@@ -3,6 +3,7 @@ import json
 from openai import OpenAI
 from backend.state import AgentState
 from backend.database import query_market_trends
+from backend.schemas import CropRecommendation
 
 # Redirect the OpenAI SDK to use OpenRouter's endpoint
 client = OpenAI(
@@ -76,55 +77,76 @@ def feasibility_agent(state: AgentState) -> dict:
     Feasibility Agent: Synthesizes climate and market data to output a final feasibility and crop recommendation.
     """
     farmer_data = state.get("farmer_data")
-    climate_data = state.get("climate_data", {})
-    market_trends = state.get("market_trends", {})
-    
-    budget = farmer_data.get("budget") if farmer_data else 0.0
-    climate_summary = climate_data.get("summary", "No climate data available.")
-    market_analysis = market_trends.get("analysis", "No market trends data available.")
-    
-    prompt = f"""You are a senior agricultural advisor. Synthesize the following information to produce a feasibility report and crop recommendations.
-Farmer Budget: ${budget}
-Climate & Soil Suitability: {climate_summary}
-Market Trends: {market_analysis}
+    if isinstance(farmer_data, dict):
+        budget = farmer_data.get("budget", 0.0)
+    elif farmer_data is not None:
+        budget = getattr(farmer_data, "budget", 0.0)
+    else:
+        budget = 0.0
 
-Return a structured JSON with:
-1. "report": A high-level feasibility report text (under 100 words).
-2. "recommendations": A list of crop recommendation objects, each containing:
-   - "crop_name": name of the crop
-   - "estimated_yield": estimated yield description
-   - "reasoning": brief explanation why it fits budget/climate/market
+    climate_data = state.get("climate_data") or {}
+    ecological_limits = climate_data.get("summary", "No climate data available.")
+
+    market_trends = state.get("market_trends") or {}
+    market_context = market_trends.get("analysis", "No market trends data available.")
+
+    system_prompt = (
+        "You are a hard-nosed agricultural economist. Evaluate the input text data and choose "
+        "the single most viable crop strategy. "
+        "Absolute restriction: If a crop's cultivation cost per acre exceeds the farmer's available capital "
+        "(budget), it must be rejected instantly, regardless of its market popularity or potential yield. "
+        "Select the single most viable crop that fits within the budget and aligns with the climate/ecological limits and market trends."
+    )
+
+    user_prompt = f"""
+Please evaluate the following information and recommend the single best crop strategy:
+
+Farmer's Available Capital (Budget): ${budget}
+Ecological & Climate Limits: {ecological_limits}
+Market Trends & Pricing Context: {market_context}
 """
 
-    response = client.chat.completions.create(
+    response = client.beta.chat.completions.parse(
         model=MODEL_NAME,
         messages=[
-            {"role": "system", "content": "You are a professional agricultural advisor. You must output valid JSON matching the requested structure."},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ],
-        response_format={"type": "json_object"},
+        response_format=CropRecommendation,
         temperature=0.2
     )
-    
-    try:
-        report_data = json.loads(response.choices[0].message.content.strip())
-    except Exception:
-        # Fallback if JSON parsing fails
-        report_data = {
-            "report": "Failed to parse feasibility report.",
-            "recommendations": []
-        }
-        
-    return {"feasibility_report": report_data}
+
+    feasibility_report = response.choices[0].message.parsed
+    if not feasibility_report:
+        feasibility_report = CropRecommendation(
+            crop_name="Failed to recommend",
+            estimated_yield="N/A",
+            reasoning="Pydantic parsing failed or model returned invalid structure."
+        )
+
+    return {
+        "feasibility_report": feasibility_report,
+        "next_node": "__end__"
+    }
 
 def supervisor_agent(state: AgentState) -> dict:
     """
     Supervisor Agent: Reads the state and determines which node to visit next.
     Options: 'climate_agent', 'market_agent', 'feasibility_agent', or 'end'.
     """
+    if state.get("next_node") == "__end__":
+        return {"next_node": "end"}
+
     climate_done = "summary" in state.get("climate_data", {})
     market_done = "analysis" in state.get("market_trends", {})
-    feasibility_done = "report" in state.get("feasibility_report", {})
+    
+    feasibility_report = state.get("feasibility_report", {})
+    feasibility_done = False
+    if feasibility_report:
+        if isinstance(feasibility_report, dict):
+            feasibility_done = "report" in feasibility_report or "crop_name" in feasibility_report
+        else:
+            feasibility_done = hasattr(feasibility_report, "crop_name")
     
     prompt = f"""You are the supervisor agent for a multi-agent system.
 Your job is to route to the correct next step.
